@@ -1,0 +1,42 @@
+{
+  "name": "@zixiao-labs/mythosdbg",
+  "version": "0.0.0",
+  "description": "Mythos Debugger — Logos's first-party multi-runtime DAP server (codename TIANSHI PILLAR).",
+  "main": "dist/server.js",
+  "type": "module",
+  "bin": {
+    "mythosdbg": "dist/runDebugAdapter.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "Lore.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@vscode/debugadapter": "^1.68.0",
+    "@vscode/debugprotocol": "^1.68.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "license": "MIT",
+  "author": "Zixiao Laboratory",
+  "homepage": "https://github.com/zixiao-labs/mythosdbg#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zixiao-labs/mythosdbg.git"
+  }
+}
