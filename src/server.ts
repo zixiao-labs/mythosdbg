@@ -1,7 +1,8 @@
-import { MythosSession } from "./core/mythosSession.js";
+import { MythosSession, type MythosCapabilities } from "./core/mythosSession.js";
 import { EchoRuntime } from "./runtimes/echo.js";
 import { CppLldbRuntime } from "./runtimes/cppLldb.js";
 import { CppCdbRuntime } from "./runtimes/cppWindows.js";
+import { createRequire } from "node:module";
 import type { LaunchArguments, Runtime } from "./core/runtime.js";
 
 /**
@@ -27,5 +28,33 @@ function runtimeFactory(config: LaunchArguments): Runtime {
   }
 }
 
-const session = new MythosSession(runtimeFactory);
+const SUPPORTED_TYPES = ["mythos-echo", "mythos-cpp"] as const;
+
+/**
+ * Read `package.json#version` once at startup so the version we
+ * advertise to Logos is the one we actually shipped, not a guess.
+ */
+function readMythosVersion(): string {
+  try {
+    const require = createRequire(import.meta.url);
+    const pkg = require("../package.json") as { version?: string };
+    if (typeof pkg.version === "string" && pkg.version.length > 0) return pkg.version;
+  } catch {
+    /* ignore — fallthrough to "0.0.0" */
+  }
+  return "0.0.0";
+}
+
+const capabilities: MythosCapabilities = {
+  mythosVersion: readMythosVersion(),
+  schemaVersion: 1,
+  minimumLogosVersion: "1.2.0",
+  supportedTypes: [...SUPPORTED_TYPES],
+  features: {
+    attach: false,
+    remote: false,
+  },
+};
+
+const session = new MythosSession(runtimeFactory, { capabilities });
 session.start(process.stdin, process.stdout);
