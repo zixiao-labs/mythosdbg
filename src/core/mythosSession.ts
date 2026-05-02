@@ -47,15 +47,39 @@ const requestsRoutedToRuntime: ReadonlySet<string> = new Set<string>([
 
 export type RuntimeFactory = (config: LaunchArguments) => Promise<Runtime> | Runtime;
 
+/**
+ * Optional metadata advertised by Mythos to the IDE through the
+ * `mythos/capabilities` custom DAP event. The exact wire shape is
+ * pinned in `docs/integration.md`.
+ */
+export interface MythosCapabilities {
+  /** Adapter `package.json#version`. Required. */
+  mythosVersion: string;
+  /** Bumps when the capabilities body shape changes incompatibly. */
+  schemaVersion: number;
+  /** Logos refuses to run the session if its own version is older. */
+  minimumLogosVersion?: string;
+  /** DAP `type` strings the runtime factory accepts. */
+  supportedTypes: readonly string[];
+  /** Coarse feature flags. Forward-compatible — unknowns are ignored. */
+  features?: Readonly<Record<string, boolean>>;
+}
+
+export interface MythosSessionOptions {
+  capabilities?: MythosCapabilities;
+}
+
 export class MythosSession extends LoggingDebugSession {
   private runtime: Runtime | null = null;
   private readonly runtimeFactory: RuntimeFactory;
+  private readonly capabilities: MythosCapabilities | null;
 
-  constructor(runtimeFactory: RuntimeFactory) {
+  constructor(runtimeFactory: RuntimeFactory, options: MythosSessionOptions = {}) {
     super("mythosdbg.log");
     this.setDebuggerLinesStartAt1(true);
     this.setDebuggerColumnsStartAt1(true);
     this.runtimeFactory = runtimeFactory;
+    this.capabilities = options.capabilities ?? null;
   }
 
   protected initializeRequest(
@@ -83,6 +107,13 @@ export class MythosSession extends LoggingDebugSession {
     });
     this.sendResponse(response);
     this.sendEvent({ event: "initialized", type: "event" } as DebugProtocol.InitializedEvent);
+    if (this.capabilities) {
+      this.sendEvent({
+        event: "mythos/capabilities",
+        type: "event",
+        body: this.capabilities,
+      } as DebugProtocol.Event);
+    }
   }
 
   protected async launchRequest(
