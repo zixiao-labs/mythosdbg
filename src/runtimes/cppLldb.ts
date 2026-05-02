@@ -1,23 +1,34 @@
-import { spawn, type ChildProcess, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { Buffer } from "node:buffer";
 import path from "node:path";
 import type { DebugProtocol } from "@vscode/debugprotocol";
 import type { Runtime, LaunchArguments } from "../core/runtime";
+import { resolveAttachPid } from "../core/processes.js";
+import {
+  createSubprocessTransport,
+  createRemoteTransport,
+  type DapTransport,
+  type RemoteLaunchBlock,
+} from "../core/transport.js";
+import { buildResolverFromLaunchConfig, type SourceResolver } from "../core/sources.js";
 
 /**
  * C/C++ runtime — wraps `lldb-dap` (LLVM 18+'s official DAP server)
- * as a child process and proxies DAP frames. The wrapper is what
- * gives Mythos a place to add value-add features later (custom
- * source mapping, snapshot capture, distributed debug, …) without
- * forking lldb.
+ * and proxies DAP frames. The wrapper gives Mythos a place to add
+ * value-add features later (custom source mapping, snapshot capture,
+ * distributed debug, …) without forking lldb.
  *
- * Discovery order:
+ * Connection mode is decided by the launch config:
+ *   - `config.remote` present → use a TCP / SSH transport from
+ *     `core/transport.ts`. Useful when the binary actually lives on
+ *     another host (`lldb-server platform --listen *:1234`,
+ *     `gdbserver :1234 ./hello`, …).
+ *   - Otherwise → spawn `lldb-dap` locally and use its stdio.
+ *
+ * Local discovery order:
  *   1. `config.debugAdapter` if the user pins one in launch.json
  *   2. `lldb-dap` on PATH
  *   3. `xcrun --find lldb-dap` (macOS only)
- *
- * If none resolve, `start()` rejects with a helpful error so the
- * Mythos session surfaces it as an unsuccessful `launch` response.
  *
  * Tracking issue (mythosdbg): Windows support (cdb / windbg) is not
  * implemented. See the Stage 3.5 plan H.4 for the open issue list.
@@ -35,50 +46,53 @@ type Pending = {
 
 export class CppLldbRuntime implements Runtime {
   readonly id = "mythos-cpp";
-  private child: ChildProcess | null = null;
+  private transport: DapTransport | null = null;
   private buffer: Buffer = Buffer.alloc(0);
   private nextSeq = 1;
   private readonly pending = new Map<number, Pending>();
   private emit: ((evt: DebugProtocol.Event) => void) | null = null;
   private readonly config: LaunchArguments;
+  private readonly sources: SourceResolver;
 
   constructor(config: LaunchArguments) {
     this.config = config;
+    this.sources = buildResolverFromLaunchConfig(
+      config as { sourceMap?: Record<string, string>; symbolSearchPath?: string[] } &
+        Record<string, unknown>,
+      (config.workspaceFolder as string | undefined) ?? config.cwd,
+    );
   }
 
   async start(emit: (evt: DebugProtocol.Event) => void): Promise<void> {
     this.emit = emit;
-    const command = await this.resolveAdapter();
-    this.child = spawn(command, [], {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, ...((this.config.env as Record<string, string>) ?? {}) },
-      cwd: this.config.cwd,
-    });
-    this.child.stdout?.on("data", (chunk: Buffer) => this.feed(chunk));
-    this.child.stderr?.on("data", (chunk: Buffer) => {
+    this.transport = await this.openTransport();
+    this.transport.onData((chunk) => this.feed(chunk));
+    this.transport.onError((err) => {
       this.emit?.({
         seq: 0,
         type: "event",
         event: "output",
-        body: { category: "stderr", output: chunk.toString("utf8") },
+        body: { category: "stderr", output: `lldb-dap transport error: ${err.message}\n` },
       } as DebugProtocol.OutputEvent);
-    });
-    this.child.once("exit", (code) => {
-      // Reject all pending requests with a descriptive error
-      for (const [seq, slot] of this.pending.entries()) {
-        slot.reject(new Error(`lldb-dap exited with code ${code ?? "unknown"} while '${slot.command}' was pending`));
+      for (const [, slot] of this.pending.entries()) {
+        slot.reject(new Error(`lldb-dap transport failed ('${slot.command}' pending): ${err.message}`));
       }
       this.pending.clear();
-
+    });
+    this.transport.onClose((info) => {
+      const desc = "code" in info && info.code != null
+        ? `code=${info.code}`
+        : info.reason ?? "closed";
+      for (const [, slot] of this.pending.entries()) {
+        slot.reject(new Error(`lldb-dap transport closed (${desc}) while '${slot.command}' was pending`));
+      }
+      this.pending.clear();
       if (this.emit) {
         this.emit({
           seq: 0,
           type: "event",
           event: "output",
-          body: {
-            category: "console",
-            output: `lldb-dap exited (code=${code ?? "?"})\n`,
-          },
+          body: { category: "console", output: `lldb-dap transport closed (${desc})\n` },
         } as DebugProtocol.OutputEvent);
         this.emit({
           seq: 0,
@@ -86,18 +100,7 @@ export class CppLldbRuntime implements Runtime {
           event: "terminated",
         } as DebugProtocol.TerminatedEvent);
       }
-      this.child = null;
-    });
-    this.child.once("error", (err) => {
-      this.emit?.({
-        seq: 0,
-        type: "event",
-        event: "output",
-        body: {
-          category: "stderr",
-          output: `lldb-dap error: ${err.message}\n`,
-        },
-      } as DebugProtocol.OutputEvent);
+      this.transport = null;
     });
 
     await this.request("initialize", {
@@ -107,29 +110,102 @@ export class CppLldbRuntime implements Runtime {
       linesStartAt1: true,
       columnsStartAt1: true,
     });
-    await this.request("launch", this.config);
+    if (this.config.request === "attach") {
+      // Resolve any user-supplied processName / processId into a
+      // concrete PID before forwarding to lldb-dap. This gives us
+      // consistent error messages (with ptrace_scope hints on Linux)
+      // across runtimes; lldb-dap accepts `pid` on its attach body.
+      const pid = resolveAttachPid({
+        processId: this.config.processId as number | undefined,
+        processName: this.config.processName as string | undefined,
+      });
+      const attachBody: Record<string, unknown> = { ...this.config, pid };
+      delete attachBody.processName;
+      await this.request("attach", attachBody);
+    } else {
+      await this.request("launch", this.config);
+    }
   }
 
   async handle(command: string, args: unknown): Promise<unknown> {
-    return this.request(command, args);
+    // Intercept `source` requests for references the resolver minted.
+    // The underlying debugger has never heard of those references, so
+    // forwarding would always fail.
+    if (command === "source") {
+      const sourceArgs = args as DebugProtocol.SourceArguments | undefined;
+      const ref = sourceArgs?.sourceReference ?? 0;
+      if (ref > 0 && this.sources.ownsReference(ref)) {
+        const body = this.sources.getBody(ref);
+        if (body) return body;
+      }
+    }
+
+    const body = await this.request(command, args);
+
+    // Apply source-map rewrites on the way back up. The resolver is a
+    // no-op when no `sourceMap` was supplied, so the cost is constant.
+    if (command === "stackTrace" && body && typeof body === "object") {
+      return this.sources.rewriteStackTraceBody(
+        body as DebugProtocol.StackTraceResponse["body"],
+      );
+    }
+    if (command === "loadedSources" && body && typeof body === "object") {
+      return this.sources.rewriteLoadedSourcesBody(
+        body as DebugProtocol.LoadedSourcesResponse["body"],
+      );
+    }
+    return body;
   }
 
   async dispose(): Promise<void> {
-    if (!this.child) return;
+    if (!this.transport) return;
     try {
-      await this.request("disconnect", { terminateDebuggee: true });
+      await this.request("disconnect", {
+        // attach sessions must NOT kill the debuggee by default —
+        // see issue mythosdbg#3.
+        terminateDebuggee: this.config.request !== "attach",
+      });
     } catch {
       /* ignore — adapter may already have torn down */
     }
-    if (this.child && this.child.exitCode === null) {
+    try {
+      this.transport.close();
+    } catch {
+      /* ignore */
+    }
+    this.transport = null;
+    this.emit = null;
+  }
+
+  /** Open the right transport for this launch configuration. */
+  private async openTransport(): Promise<DapTransport> {
+    const remote = this.config.remote as RemoteLaunchBlock | undefined;
+    if (remote && typeof remote === "object") {
       try {
-        this.child.kill();
-      } catch {
-        /* ignore */
+        return await createRemoteTransport(remote);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`Could not open remote DAP transport: ${message}`);
       }
     }
-    this.child = null;
-    this.emit = null;
+
+    const command = await this.resolveAdapter();
+    const subprocess = createSubprocessTransport({
+      command,
+      env: (this.config.env as Record<string, string> | undefined) ?? undefined,
+      cwd: this.config.cwd,
+    });
+    // Forward lldb-dap's stderr verbatim — it carries crash diagnostics
+    // we never want to swallow.
+    subprocess.stderr?.on("data", (chunk: Buffer) => {
+      this.emit?.({
+        seq: 0,
+        type: "event",
+        event: "output",
+        body: { category: "stderr", output: chunk.toString("utf8") },
+      } as DebugProtocol.OutputEvent);
+    });
+    return subprocess;
   }
 
   private async resolveAdapter(): Promise<string> {
@@ -214,7 +290,7 @@ export class CppLldbRuntime implements Runtime {
   }
 
   private request(command: string, args: unknown): Promise<unknown> {
-    if (!this.child) return Promise.reject(new Error("lldb-dap is not running"));
+    if (!this.transport) return Promise.reject(new Error("lldb-dap transport is not open"));
     const seq = this.nextSeq++;
     const req: DebugProtocol.Request = {
       seq,
@@ -236,8 +312,8 @@ export class CppLldbRuntime implements Runtime {
   private write(msg: DebugProtocol.ProtocolMessage): void {
     const body = JSON.stringify(msg);
     const head = `Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n`;
-    this.child?.stdin?.write(head);
-    this.child?.stdin?.write(body, "utf8");
+    this.transport?.write(head);
+    this.transport?.write(body);
   }
 }
 
