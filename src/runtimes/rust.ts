@@ -98,6 +98,7 @@ export class RustRuntime implements Runtime {
         slot.reject(new Error(`lldb-dap failed to start ('${slot.command}' pending): ${err.message}`));
       }
       this.pending.clear();
+      this.child = null;
     });
 
     await this.request("initialize", {
@@ -189,7 +190,11 @@ export class RustRuntime implements Runtime {
   private detectRustSysroot(): string | null {
     const explicit = this.config.rustSysroot as string | undefined;
     if (explicit && existsSync(explicit)) return explicit;
-    const probe = spawnSync("rustc", ["--print", "sysroot"], { encoding: "utf8" });
+    const probe = spawnSync("rustc", ["--print", "sysroot"], {
+      encoding: "utf8",
+      cwd: this.config.cwd,
+      env: { ...process.env, ...(this.config.env || {}) },
+    });
     if (probe.status === 0 && probe.stdout.trim()) return probe.stdout.trim();
     return null;
   }
@@ -201,20 +206,32 @@ export class RustRuntime implements Runtime {
    * file is malformed we silently fall back to no source map.
    */
   private deriveSourceMapFromCargo(): Record<string, string> | null {
-    const cwd = this.config.cwd ?? process.cwd();
-    const candidates = [
-      path.join(cwd, ".cargo", "config.toml"),
-      path.join(cwd, ".cargo", "config"),
-    ];
-    for (const file of candidates) {
-      if (!existsSync(file)) continue;
-      try {
-        const text = readFileSync(file, "utf8");
-        const map = parseCargoSourceMap(text);
-        if (map && Object.keys(map).length > 0) return map;
-      } catch {
-        /* ignore unreadable / malformed files */
+    let currentDir = this.config.cwd ?? process.cwd();
+    const root = path.parse(currentDir).root;
+
+    while (true) {
+      const candidates = [
+        path.join(currentDir, ".cargo", "config.toml"),
+        path.join(currentDir, ".cargo", "config"),
+      ];
+      for (const file of candidates) {
+        if (!existsSync(file)) continue;
+        try {
+          const text = readFileSync(file, "utf8");
+          const map = parseCargoSourceMap(text);
+          if (map && Object.keys(map).length > 0) return map;
+        } catch {
+          /* ignore unreadable / malformed files */
+        }
       }
+
+      // Stop if we've reached the root
+      if (currentDir === root) break;
+
+      // Move up one directory
+      const parent = path.dirname(currentDir);
+      if (parent === currentDir) break; // Safety check
+      currentDir = parent;
     }
     return null;
   }
@@ -281,6 +298,9 @@ export class RustRuntime implements Runtime {
 
   private request(command: string, args: unknown): Promise<unknown> {
     if (!this.child) return Promise.reject(new Error("lldb-dap is not running"));
+    if (!this.child.stdin || this.child.stdin.writableEnded || this.child.stdin.destroyed) {
+      return Promise.reject(new Error("lldb-dap stdin is not writable"));
+    }
     const seq = this.nextSeq++;
     const req: DebugProtocol.Request = {
       seq,
