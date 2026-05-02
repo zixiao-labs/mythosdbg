@@ -1,6 +1,17 @@
 export { MythosSession } from "./core/mythosSession.js";
 export { HandlePool } from "./core/handles.js";
 export {
+  findProcesses,
+  listProcesses,
+  resolveAttachPid,
+  checkPtraceScopeHint,
+} from "./core/processes.js";
+export type {
+  ProcessInfo,
+  FindProcessesQuery,
+  AttachSelector,
+} from "./core/processes.js";
+export {
   createSubprocessTransport,
   createTcpTransport,
   createSshTransport,
