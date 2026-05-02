@@ -2,6 +2,9 @@ import { MythosSession, type MythosCapabilities } from "./core/mythosSession.js"
 import { EchoRuntime } from "./runtimes/echo.js";
 import { CppLldbRuntime } from "./runtimes/cppLldb.js";
 import { RustRuntime } from "./runtimes/rust.js";
+import { PythonRuntime } from "./runtimes/python.js";
+import { GoRuntime } from "./runtimes/go.js";
+import { LuaRuntime } from "./runtimes/lua.js";
 import { CppCdbRuntime } from "./runtimes/cppWindows.js";
 import { createRequire } from "node:module";
 import type { LaunchArguments, Runtime } from "./core/runtime.js";
@@ -10,9 +13,12 @@ import type { LaunchArguments, Runtime } from "./core/runtime.js";
  * Mythos DAP server entry point. Picks the runtime by the launch
  * config's `type` field and hands off to MythosSession.
  *
- *   - `mythos-echo` → EchoRuntime (built-in self-test)
- *   - `mythos-cpp`  → CppLldbRuntime on POSIX, CppCdbRuntime on Windows
- *   - `mythos-rust` → RustRuntime (lldb-dap + Rust pretty-printers)
+ *   - `mythos-echo`   → EchoRuntime (built-in self-test)
+ *   - `mythos-cpp`    → CppLldbRuntime on POSIX, CppCdbRuntime on Windows
+ *   - `mythos-rust`   → RustRuntime (lldb-dap + Rust pretty-printers)
+ *   - `mythos-python` → PythonRuntime (debugpy wrapper)
+ *   - `mythos-go`     → GoRuntime (Delve `dlv dap` wrapper)
+ *   - `mythos-lua`    → LuaRuntime (actboy168/lua-debug wrapper)
  *
  * Anything else throws on `launch`. New runtime types are added in
  * `runtimes/` and registered in `runtimeFactory` here.
@@ -27,12 +33,18 @@ function runtimeFactory(config: LaunchArguments): Runtime {
         : new CppLldbRuntime(config);
     case "mythos-rust":
       return new RustRuntime(config);
+    case "mythos-python":
+      return new PythonRuntime(config);
+    case "mythos-go":
+      return new GoRuntime(config);
+    case "mythos-lua":
+      return new LuaRuntime(config);
     default:
       throw new Error(`mythosdbg: unsupported launch type '${config.type}'`);
   }
 }
 
-const SUPPORTED_TYPES = ["mythos-echo", "mythos-cpp", "mythos-rust"] as const;
+const SUPPORTED_TYPES = ["mythos-echo", "mythos-cpp", "mythos-rust", "mythos-python", "mythos-go", "mythos-lua"] as const;
 
 /**
  * Read `package.json#version` once at startup so the version we
@@ -55,7 +67,7 @@ const capabilities: MythosCapabilities = {
   minimumLogosVersion: "1.2.0",
   supportedTypes: [...SUPPORTED_TYPES],
   features: {
-    attach: false,
+    attach: true,
     remote: false,
   },
 };
