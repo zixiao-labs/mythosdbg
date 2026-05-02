@@ -11,10 +11,12 @@ v0.0.0 prototype (Stage 3.5 of the Logos workstation dev plan).
 What works:
 - DAP server skeleton (TypeScript, `@vscode/debugadapter`)
 - `mythos-echo` runtime — a no-op runtime used by the self-test
-- `mythos-cpp` prototype — proxies `lldb-dap` (LLVM 18+) for C/C++
+- `mythos-cpp` prototype:
+  - POSIX: proxies `lldb-dap` (LLVM 18+) for C/C++
+  - Windows: drives `cdb.exe` (Windows SDK Debugging Tools) — v0.0
+    prototype covering stop / step / variables / call stack
 
 What's open (see GitHub issues):
-- Windows C/C++ runtime (cdb / windbg DAP wrapping)
 - Source mapping / DWARF / PDB layer
 - JIT-attach flow
 - Remote debugging (gdbserver / lldb-server)
@@ -31,3 +33,10 @@ node dist/server.js   # speak DAP over stdio
 
 In Logos, this binary is dropped under `${userData}/extras/mythosdbg/`
 by the optional-download flow exposed in Settings → Debugging.
+
+## Integration with Logos
+
+The wire contract between Mythos and Logos — release artifact naming,
+checksum format, tarball layout, the `mythos/capabilities`
+handshake — is pinned in [`docs/integration.md`](docs/integration.md).
+Releases are produced by [`.github/workflows/release.yml`](.github/workflows/release.yml).
