@@ -31,3 +31,10 @@ node dist/server.js   # speak DAP over stdio
 
 In Logos, this binary is dropped under `${userData}/extras/mythosdbg/`
 by the optional-download flow exposed in Settings → Debugging.
+
+## Integration with Logos
+
+The wire contract between Mythos and Logos — release artifact naming,
+checksum format, tarball layout, the `mythos/capabilities`
+handshake — is pinned in [`docs/integration.md`](docs/integration.md).
+Releases are produced by [`.github/workflows/release.yml`](.github/workflows/release.yml).
