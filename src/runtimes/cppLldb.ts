@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import path from "node:path";
 import type { DebugProtocol } from "@vscode/debugprotocol";
 import type { Runtime, LaunchArguments } from "../core/runtime";
+import { resolveAttachPid } from "../core/processes.js";
 
 /**
  * C/C++ runtime — wraps `lldb-dap` (LLVM 18+'s official DAP server)
@@ -65,7 +66,7 @@ export class CppLldbRuntime implements Runtime {
     });
     this.child.once("exit", (code) => {
       // Reject all pending requests with a descriptive error
-      for (const [seq, slot] of this.pending.entries()) {
+      for (const [, slot] of this.pending.entries()) {
         slot.reject(new Error(`lldb-dap exited with code ${code ?? "unknown"} while '${slot.command}' was pending`));
       }
       this.pending.clear();
@@ -107,7 +108,21 @@ export class CppLldbRuntime implements Runtime {
       linesStartAt1: true,
       columnsStartAt1: true,
     });
-    await this.request("launch", this.config);
+    if (this.config.request === "attach") {
+      // Resolve any user-supplied processName / processId into a
+      // concrete PID before forwarding to lldb-dap. This gives us
+      // consistent error messages (with ptrace_scope hints on Linux)
+      // across runtimes; lldb-dap accepts `pid` on its attach body.
+      const pid = resolveAttachPid({
+        processId: this.config.processId as number | undefined,
+        processName: this.config.processName as string | undefined,
+      });
+      const attachBody: Record<string, unknown> = { ...this.config, pid };
+      delete attachBody.processName;
+      await this.request("attach", attachBody);
+    } else {
+      await this.request("launch", this.config);
+    }
   }
 
   async handle(command: string, args: unknown): Promise<unknown> {
@@ -117,7 +132,11 @@ export class CppLldbRuntime implements Runtime {
   async dispose(): Promise<void> {
     if (!this.child) return;
     try {
-      await this.request("disconnect", { terminateDebuggee: true });
+      await this.request("disconnect", {
+        // attach sessions must NOT kill the debuggee by default —
+        // see issue mythosdbg#3.
+        terminateDebuggee: this.config.request !== "attach",
+      });
     } catch {
       /* ignore — adapter may already have torn down */
     }
