@@ -4,6 +4,7 @@ import path from "node:path";
 import type { DebugProtocol } from "@vscode/debugprotocol";
 import type { Runtime, LaunchArguments } from "../core/runtime";
 import { resolveAttachPid } from "../core/processes.js";
+import { buildResolverFromLaunchConfig, type SourceResolver } from "../core/sources.js";
 
 /**
  * C/C++ runtime — wraps `lldb-dap` (LLVM 18+'s official DAP server)
@@ -42,9 +43,15 @@ export class CppLldbRuntime implements Runtime {
   private readonly pending = new Map<number, Pending>();
   private emit: ((evt: DebugProtocol.Event) => void) | null = null;
   private readonly config: LaunchArguments;
+  private readonly sources: SourceResolver;
 
   constructor(config: LaunchArguments) {
     this.config = config;
+    this.sources = buildResolverFromLaunchConfig(
+      config as { sourceMap?: Record<string, string>; symbolSearchPath?: string[] } &
+        Record<string, unknown>,
+      (config.workspaceFolder as string | undefined) ?? config.cwd,
+    );
   }
 
   async start(emit: (evt: DebugProtocol.Event) => void): Promise<void> {
@@ -126,7 +133,33 @@ export class CppLldbRuntime implements Runtime {
   }
 
   async handle(command: string, args: unknown): Promise<unknown> {
-    return this.request(command, args);
+    // Intercept `source` requests for references the resolver minted.
+    // The underlying debugger has never heard of those references, so
+    // forwarding would always fail.
+    if (command === "source") {
+      const sourceArgs = args as DebugProtocol.SourceArguments | undefined;
+      const ref = sourceArgs?.sourceReference ?? 0;
+      if (ref > 0 && this.sources.ownsReference(ref)) {
+        const body = this.sources.getBody(ref);
+        if (body) return body;
+      }
+    }
+
+    const body = await this.request(command, args);
+
+    // Apply source-map rewrites on the way back up. The resolver is a
+    // no-op when no `sourceMap` was supplied, so the cost is constant.
+    if (command === "stackTrace" && body && typeof body === "object") {
+      return this.sources.rewriteStackTraceBody(
+        body as DebugProtocol.StackTraceResponse["body"],
+      );
+    }
+    if (command === "loadedSources" && body && typeof body === "object") {
+      return this.sources.rewriteLoadedSourcesBody(
+        body as DebugProtocol.LoadedSourcesResponse["body"],
+      );
+    }
+    return body;
   }
 
   async dispose(): Promise<void> {
