@@ -11,6 +11,19 @@ export type {
   FindProcessesQuery,
   AttachSelector,
 } from "./core/processes.js";
+export {
+  createSubprocessTransport,
+  createTcpTransport,
+  createSshTransport,
+  createRemoteTransport,
+} from "./core/transport.js";
+export type {
+  DapTransport,
+  SubprocessTransportOptions,
+  TcpTransportOptions,
+  SshTransportOptions,
+  RemoteLaunchBlock,
+} from "./core/transport.js";
 export { SourceResolver, buildResolverFromLaunchConfig } from "./core/sources.js";
 export type {
   SourceResolverOptions,
