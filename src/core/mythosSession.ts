@@ -41,6 +41,8 @@ const requestsRoutedToRuntime: ReadonlySet<string> = new Set<string>([
   "modules",
   "readMemory",
   "terminateThreads",
+  "writeMemory",
+  "disassemble",
 ]);
 
 export type RuntimeFactory = (config: LaunchArguments) => Promise<Runtime> | Runtime;
