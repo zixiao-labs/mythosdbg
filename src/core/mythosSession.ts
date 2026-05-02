@@ -76,8 +76,8 @@ export class MythosSession extends LoggingDebugSession {
       supportsLogPoints: true,
       supportsModulesRequest: true,
       supportsReadMemoryRequest: true,
-      supportsWriteMemoryRequest: false,
-      supportsDisassembleRequest: false,
+      supportsWriteMemoryRequest: true,
+      supportsDisassembleRequest: true,
     });
     this.sendResponse(response);
     this.sendEvent({ event: "initialized", type: "event" } as DebugProtocol.InitializedEvent);
