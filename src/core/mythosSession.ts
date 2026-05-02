@@ -40,8 +40,6 @@ const requestsRoutedToRuntime: ReadonlySet<string> = new Set<string>([
   "exceptionInfo",
   "modules",
   "readMemory",
-  "writeMemory",
-  "disassemble",
   "terminateThreads",
 ]);
 

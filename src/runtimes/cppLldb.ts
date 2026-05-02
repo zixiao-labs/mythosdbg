@@ -64,6 +64,12 @@ export class CppLldbRuntime implements Runtime {
       } as DebugProtocol.OutputEvent);
     });
     this.child.once("exit", (code) => {
+      // Reject all pending requests with a descriptive error
+      for (const [seq, slot] of this.pending.entries()) {
+        slot.reject(new Error(`lldb-dap exited with code ${code ?? "unknown"} while '${slot.command}' was pending`));
+      }
+      this.pending.clear();
+
       if (this.emit) {
         this.emit({
           seq: 0,
