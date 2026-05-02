@@ -37,3 +37,4 @@ export { PythonRuntime } from "./runtimes/python.js";
 export { GoRuntime } from "./runtimes/go.js";
 export { LuaRuntime } from "./runtimes/lua.js";
 export { CppCdbRuntime } from "./runtimes/cppWindows.js";
+export { RustRuntime } from "./runtimes/rust.js";
