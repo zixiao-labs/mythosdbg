@@ -33,5 +33,6 @@ export type {
 export type { Runtime, LaunchArguments } from "./core/runtime.js";
 export { EchoRuntime } from "./runtimes/echo.js";
 export { CppLldbRuntime } from "./runtimes/cppLldb.js";
+export { GoRuntime } from "./runtimes/go.js";
 export { LuaRuntime } from "./runtimes/lua.js";
 export { CppCdbRuntime } from "./runtimes/cppWindows.js";

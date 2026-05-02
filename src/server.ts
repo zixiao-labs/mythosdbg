@@ -1,6 +1,7 @@
 import { MythosSession, type MythosCapabilities } from "./core/mythosSession.js";
 import { EchoRuntime } from "./runtimes/echo.js";
 import { CppLldbRuntime } from "./runtimes/cppLldb.js";
+import { GoRuntime } from "./runtimes/go.js";
 import { LuaRuntime } from "./runtimes/lua.js";
 import { CppCdbRuntime } from "./runtimes/cppWindows.js";
 import { createRequire } from "node:module";
@@ -12,6 +13,7 @@ import type { LaunchArguments, Runtime } from "./core/runtime.js";
  *
  *   - `mythos-echo` → EchoRuntime (built-in self-test)
  *   - `mythos-cpp`  → CppLldbRuntime on POSIX, CppCdbRuntime on Windows
+ *   - `mythos-go`   → GoRuntime (Delve `dlv dap` wrapper)
  *   - `mythos-lua`  → LuaRuntime (actboy168/lua-debug wrapper)
  *
  * Anything else throws on `launch`. New runtime types are added in
@@ -25,6 +27,8 @@ function runtimeFactory(config: LaunchArguments): Runtime {
       return process.platform === "win32"
         ? new CppCdbRuntime(config)
         : new CppLldbRuntime(config);
+    case "mythos-go":
+      return new GoRuntime(config);
     case "mythos-lua":
       return new LuaRuntime(config);
     default:
@@ -32,7 +36,7 @@ function runtimeFactory(config: LaunchArguments): Runtime {
   }
 }
 
-const SUPPORTED_TYPES = ["mythos-echo", "mythos-cpp", "mythos-lua"] as const;
+const SUPPORTED_TYPES = ["mythos-echo", "mythos-cpp", "mythos-go", "mythos-lua"] as const;
 
 /**
  * Read `package.json#version` once at startup so the version we
