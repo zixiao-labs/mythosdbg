@@ -1,5 +1,18 @@
 export { MythosSession } from "./core/mythosSession.js";
 export { HandlePool } from "./core/handles.js";
+export {
+  createSubprocessTransport,
+  createTcpTransport,
+  createSshTransport,
+  createRemoteTransport,
+} from "./core/transport.js";
+export type {
+  DapTransport,
+  SubprocessTransportOptions,
+  TcpTransportOptions,
+  SshTransportOptions,
+  RemoteLaunchBlock,
+} from "./core/transport.js";
 export type { Runtime, LaunchArguments } from "./core/runtime.js";
 export { EchoRuntime } from "./runtimes/echo.js";
 export { CppLldbRuntime } from "./runtimes/cppLldb.js";
