@@ -1,6 +1,6 @@
 {
   "name": "@zixiao-labs/mythosdbg",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Mythos Debugger — Logos's first-party multi-runtime DAP server (codename TIANSHI PILLAR).",
   "main": "dist/server.js",
   "type": "module",
