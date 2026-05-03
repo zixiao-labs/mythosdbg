@@ -23,8 +23,6 @@ jobs:
         include:
           - arch: darwin-arm64
             runner: macos-14
-          - arch: darwin-x64
-            runner: macos-13
           - arch: linux-x64
             runner: ubuntu-latest
           - arch: linux-arm64
